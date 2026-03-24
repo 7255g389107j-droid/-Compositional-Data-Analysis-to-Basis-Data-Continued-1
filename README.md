@@ -1,0 +1,2 @@
+# -Compositional-Data-Analysis-to-Basis-Data-Continued-1
+Itagaki Ensemble Engine is a commercial-grade R framework for compositional deconvolution. It restores absolute scaling factors from relative abundance without spike-ins. Features: automated subcomposition pruning, elbow-based anchor selection, 95% bootstrap CIs, and sample-wise Reliability Score (Consensus R2) to overcome closure artifacts. 
