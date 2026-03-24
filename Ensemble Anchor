@@ -1,0 +1,138 @@
+# =================================================================
+# ULTIMATE ENSEMBLE DECONVOLUTION: THE ITAGAKI-ELBOW SYSTEM (V7.0)
+# -----------------------------------------------------------------
+# FIX: Removed Duplicate Labels | Enhanced Staggered Logic
+# FEATURE: Automatic Sample ID Recognition for X-Axis
+# AUTHOR: Tatsuki Itagaki
+# Copyright (c) 2026 Tatsuki Itagaki
+# License: MIT License (https://opensource.org)
+# 
+# ACADEMIC CITATION:
+# If you use this software or its logic in your research, 
+# please cite the following works:
+# Ohta, T. (2011). DOI: 10.1007/s11004-011-9332-y
+# =================================================================
+
+# --- 0. DATA PREPARATION ---
+set.seed(42)
+if(!exists("Dataset")) stop("Object 'Dataset' not found.")
+raw_data <- as.matrix(Dataset)
+raw_data[is.na(raw_data) | is.infinite(raw_data)] <- 0
+n_samples <- nrow(raw_data)
+# Use Row Names if available, otherwise use indices
+sample_ids <- if(!is.null(rownames(raw_data))) rownames(raw_data) else 1:n_samples
+original_lib_size <- rowSums(raw_data)
+reliability_threshold <- 0.70
+is_constant_lib <- (sd(original_lib_size) == 0)
+
+# --- 1. SUBCOMPOSITION PRUNING ---
+min_abundance_threshold <- 0.00001
+valid_taxa_mask <- apply(raw_data, 2, function(x) all(x >= min_abundance_threshold))
+if(sum(valid_taxa_mask) < 2) stop("Too few stable taxa found.")
+sub_comp <- raw_data[, valid_taxa_mask, drop = FALSE]
+sub_comp <- sweep(sub_comp, 1, rowSums(sub_comp), "/") 
+taxa_names <- colnames(sub_comp)
+eff_lib <- 1 / mean(apply(sub_comp, 2, min))
+
+# --- 2. STABILITY SCORING & ELBOW LOGIC ---
+get_ensemble_metrics <- function(P, lib_size) {
+  L <- log(P + 1e-20) 
+  obs_v <- apply(L, 2, var); theo_v <- 1 / (colMeans(P) * lib_size)
+  ir_vals <- obs_v / (theo_v + 1e-18)
+  vlr <- var(L)
+  pi_vals <- 1 / (apply(outer(obs_v, obs_v, "+") - 2 * vlr, 1, median) + 1e-18)
+  return(list(score = rank(ir_vals) + rank(-pi_vals), ir = ir_vals, pi = pi_vals))
+}
+m_res <- get_ensemble_metrics(sub_comp, eff_lib)
+sorted_idx <- order(m_res$score); sorted_scores <- m_res$score[sorted_idx]
+n_anchors <- max(2, min(which.max(diff(sorted_scores)), ceiling(ncol(sub_comp) * 0.15)))
+anchor_indices <- sorted_idx[1:n_anchors]
+anchor_weights <- m_res$pi[anchor_indices] / sum(m_res$pi[anchor_indices])
+
+# --- 3. RECONSTRUCTION & RELIABILITY ---
+anchor_log_inv <- log(1 / (sub_comp[, anchor_indices, drop = FALSE] + 1e-20))
+sample_reliability <- apply(anchor_log_inv, 1, function(x) exp(-sum(anchor_weights * (x - sum(x * anchor_weights))^2)))
+
+# --- 4. BOOTSTRAP CI (n=1000) ---
+n_boot <- 1000
+boot_results <- matrix(NA, nrow = n_boot, ncol = n_samples)
+for(b in 1:n_boot) {
+  b_idx <- sample(anchor_indices, length(anchor_indices), replace = TRUE)
+  b_w <- m_res$pi[b_idx] / sum(m_res$pi[b_idx])
+  boot_results[b, ] <- exp(apply(log(1/(sub_comp[, b_idx, drop=F]+1e-20)), 1, function(x) sum(x * b_w)))
+  boot_results[b, ] <- boot_results[b, ] / (mean(boot_results[b, ]) + 1e-18)
+}
+final_mass <- apply(boot_results, 2, mean)
+low_ci <- apply(boot_results, 2, quantile, probs = 0.025); upp_ci <- apply(boot_results, 2, quantile, probs = 0.975)
+
+# --- 5. FIXED STAGGERED LABELING HELPER (NO DUPLICATES) ---
+staggered_label <- function(x, y, labels, cex=0.7) {
+  y_range <- diff(range(y, na.rm=TRUE))
+  if(y_range == 0) y_range <- mean(y)
+  offsets <- c(y_range * 0.08, y_range * 0.20)
+  for(i in 1:length(y)) {
+    off <- if(i %% 2 == 0) offsets[2] else offsets[1]
+    # Draw label only once
+    text(x[i], y[i] + off, labels=labels[i], pos=3, cex=cex, font=2, xpd=TRUE)
+    segments(x[i], y[i], x[i], y[i] + off*0.9, col="gray70", lty=3, lwd=0.5)
+  }
+}
+
+# --- 6. WINDOW 1: BASIS MASS RECONSTRUCTION (CLEAN LABELS) ---
+dev.new(width=14, height=9)
+par(mar=c(10,7,6,7)) # Increased bottom margin for Sample IDs
+colors <- colorRampPalette(c("#dcdde1", "#2980b9"))(100)[as.numeric(cut(sample_reliability, 100))]
+
+bp <- barplot(final_mass, col=colors, border=NA, 
+              main="WINDOW 1: ESTIMATED TOTAL MASS (BASIS DATA)", 
+              ylab="Scaling Factor (Mass)", xlab="", 
+              ylim=c(0, max(upp_ci)*1.55),
+              names.arg=sample_ids, las=2, cex.names=0.7)
+title(xlab="Sample ID", line=7) 
+
+arrows(bp, low_ci, bp, upp_ci, angle=90, code=3, length=0.03, col="black")
+# ONLY the staggered labeling remains (Standard labels are not drawn)
+staggered_label(bp, upp_ci, round(final_mass, 2), cex=0.75)
+abline(h=1, lty=2, col="#e74c3c")
+
+# --- 7. WINDOW 2: RELIABILITY & ANCHORS ---
+dev.new(width=12, height=9)
+par(mfrow=c(2,1), mar=c(8,6,5,2))
+plot(sample_reliability, type="b", pch=16, col="#e67e22", lwd=2, ylim=c(0, 1.3), 
+     main="WINDOW 2: INDIVIDUAL RELIABILITY", ylab="Reliability Index", xlab="", xaxt="n")
+axis(1, at=1:n_samples, labels=sample_ids, las=2, cex.axis=0.7)
+staggered_label(1:n_samples, sample_reliability, round(sample_reliability, 3), cex=0.75)
+pie(anchor_weights, labels=taxa_names[anchor_indices], col=terrain.colors(n_anchors), main="Anchor Weights", border="white")
+
+# --- 8. WINDOW 3: ELBOW & CORRELATION ---
+dev.new(width=12, height=9)
+par(mfrow=c(2,1), mar=c(6,6,5,2))
+plot(sorted_scores, type="b", pch=19, col="#34495e", main="WINDOW 3: ELBOW PLOT", xlab="Rank", ylab="Instability Score")
+abline(v=n_anchors, col="#e74c3c", lty=2, lwd=2)
+
+plot(original_lib_size, final_mass, pch=21, bg=colors, cex=1.5, main="Mass-Library Correlation", xlab="Original Lib Size", ylab="Estimated Mass")
+cor_val <- NA
+if(!is_constant_lib) {
+  cor_val <- cor(original_lib_size, final_mass, method="spearman")
+  fit <- lm(final_mass ~ original_lib_size)
+  if(all(is.finite(coef(fit)))) abline(fit, col="red", lty=2)
+  legend("topleft", legend=paste("Spearman Rho:", round(cor_val, 4)), bty="n", text.col="red")
+}
+
+# --- 9. FINAL REPORT ---
+cat("\n==========================================================\n")
+cat("      ITAGAKI ENSEMBLE SYSTEM V7.0: FINAL REPORT          \n")
+cat("==========================================================\n")
+cat(sprintf("Optimal Anchor Count: %d\n", n_anchors))
+cat(sprintf("Average System Reliability: %.4f\n", mean(sample_reliability)))
+if(!is.na(cor_val)) cat(sprintf("Mass-Library Correlation (Rho): %.4f\n", cor_val))
+cat("----------------------------------------------------------\n")
+cat("Anchor Weights:\n")
+print(data.frame(Taxon=taxa_names[anchor_indices], Weight=paste0(round(anchor_weights*100,2),"%")), row.names=F)
+cat("----------------------------------------------------------\n")
+unstable_samples <- which(sample_reliability < reliability_threshold)
+if(length(unstable_samples) > 0) {
+  cat(sprintf("QC ALERT: %d samples below Reliability Threshold (%.2f)\n", length(unstable_samples), reliability_threshold))
+  print(data.frame(Sample_ID=sample_ids[unstable_samples], Reliability=round(sample_reliability[unstable_samples],4)), row.names=F)
+} else { cat("QC STATUS: SUCCESS\n") }
+cat("==========================================================\n")
