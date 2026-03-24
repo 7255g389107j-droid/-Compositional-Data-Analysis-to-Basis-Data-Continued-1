@@ -39,4 +39,4 @@ MIT License - Copyright (c) 2026 Tatsuki Itagaki
 
 ## 🎓 Academic Citation
 If you use this software in your research, please cite:
-*Ohta, T. (2011). DOI: 10.1007/s11004-011-9332-y. Implementation: Itagaki Ensemble Engine.*
+*Ohta, T. (2011). DOI: 10.1007/s11004-011-9332-y. Itagaki, T (2026). DOI: 10.13140/RG.2.2.21953.93284. Implementation: Itagaki Ensemble Engine.*
