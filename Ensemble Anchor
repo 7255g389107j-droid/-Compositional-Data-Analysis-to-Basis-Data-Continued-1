@@ -49,6 +49,14 @@ n_anchors <- max(2, min(which.max(diff(sorted_scores)), ceiling(ncol(sub_comp) *
 anchor_indices <- sorted_idx[1:n_anchors]
 anchor_weights <- m_res$pi[anchor_indices] / sum(m_res$pi[anchor_indices])
 
+# --- 2.2 MANUAL ANCHOR OVERRIDE (Option) ---
+#manual_anchors <- c("Taxon_A", "Taxon_B") # User-defined anchors
+if(exists("manual_anchors")) {
+  anchor_indices <- which(taxa_names %in% manual_anchors)
+  n_anchors <- length(anchor_indices)
+  cat("MANUAL MODE: Using user-defined anchors.\n")
+}
+
 # --- 3. RECONSTRUCTION & RELIABILITY ---
 anchor_log_inv <- log(1 / (sub_comp[, anchor_indices, drop = FALSE] + 1e-20))
 sample_reliability <- apply(anchor_log_inv, 1, function(x) exp(-sum(anchor_weights * (x - sum(x * anchor_weights))^2)))
